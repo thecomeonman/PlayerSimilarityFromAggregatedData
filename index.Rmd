@@ -1,0 +1,2422 @@
+---
+title: "Identifying player replacements from aggregated data"
+author: "Aditya Kothari"
+date: "29/11/2019"
+output: html_document
+---
+
+# {.tabset .tabset-fade .tabset-pills}
+
+```{r Setup, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'hide'}
+
+library(data.table)
+library(ggplot2)
+library(ggrepel)
+library(scales)
+library(knitr)
+library(jsonlite)
+library(CodaBonito)
+theme_set(theme_bw(14))
+
+nMinMinutesPlayed = 600
+
+cDataLocation = '~/Desktop/FootballData2/'
+cScoutedPlayersDataFolderName = 'ScoutedPlayers_20181001_20190930/'
+cPostCodeFolderLocation = 
+   
+cPlayerDataFolder = paste0(
+   cDataLocation,'/', 
+   cScoutedPlayersDataFolderName
+)
+
+read_chunk('/media/ask/Data/Personal/Projects/Personal/AnalysingFootballData/AggregatedDataPlayerMatching/CommonChunks.R')
+
+knitr::knit_meta(class=NULL, clean = TRUE)
+options(knitr.duplicate.label = 'allow')
+
+bPrintLogs = F
+iPlayersToShortlist = 20
+iShortlistNumber = 0
+
+dtLabelRenaming = data.table(
+   Original = c('defensive','forward','_success','dangerous','interceptions','through'),
+   Shortened = c('def','fwd','%','danger','intcpn','thru')
+)
+
+```
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+
+```{r Functions, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+## Methodology by example {.tabset .tabset-fade .tabset-pills}
+
+### Methodology
+
+The model establishes a baseline for a player's style of play and also get an idea of the variation around that baseline the player exhibits. The baseline value and variation is calculated for each variable. So, for instance, passing accuracy, shots per 90, and successful dribbles will each have their own baseline value and variation, as will every variable.
+
+Here is a classy 2X2 matrix to explain the utility of the baseline value and the variation.
+
+```{r Trait2X2, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+print(
+   kable(
+      setnames(
+         data.table(
+            qwe = c('<b>HighVariation</b>','<b>LowVariation</b>'),
+            HighBaselineValue =  c('Strengths of this player<br>Not critical to his output','Strengths of this player<br>Critical to his output'),
+            LowBaselineValue = c('Something the player can do<br>Not critical to his output','Something the player doesn\'t do')
+         ),
+         'qwe',
+         ''
+      )
+   )
+)
+
+if ( F ) {
+      
+   ggplot(
+      data.frame(
+         BaselineValue = c('High','High','Low','Low'),
+         Variation = c('Low','High','High','Low'),
+         Text = c(
+            'Strengths of this player\nCritical to his output',
+            'Strengths of this player\nNot critical to his output',
+            'Something that player can manage\nNot critical to his output',
+            'Irrelevant'
+         )
+      )
+   ) + 
+      geom_text(
+         aes(
+            x = BaselineValue,
+            y = Variation,
+            label = Text
+         )
+      ) +
+      ggtitle('What Baseline Values and Variations Mean For a Variable')
+
+}
+```
+
+<b>Comparison</b>
+
+We now compare each variable between the PoI and all other players who play in similar roles. The comparison is made with the PoI's baseline and weighed by the variation. High baseline value, low variation variables dictate a majority of the comparison and low baseline value, high variation variables have almost no effect on the comparison. 
+
+<b>Shortlisting</b>
+
+A shortlist is drawn based on the worst difference amongst the variables from the PoI. This is so that we find players that don't impose a significant compromise on any of the individual variables. For eg. let's take a player who has lower passing accuracy, lower shots per 90, and lower successful dribbles compared to the PoI, but higher goals per 90. Based on the baseline and the variation if lower passing accuracy is the worst compared to the PoI then the other three variables don't affect the shortlisting.
+
+<b>Order of suitability</b>
+
+The order of suitability is then decided based on the total shortcomings of the shortlisted players. In this step, the lower shots per 90 and lower successful dribbles also affect the ranking while the higher goals per 90 is still not incorporated. This is again keeping in mind that we want to find players that offer the least compromise on the skills of the PoI. Any variable where the comparison with the PoI is in favour of the other player is a bonus buth expectaion from the player being compared is just to meet the PoI's baseline.
+
+<b>FAQ</b>
+
+Why are other players above the PoI?
+They are better 
+
+### Results
+
+For every player, I've calculated two shortlists. The first shortlist is only amongst players who play in the top 5 leagues. This shortlist is to validate that the results we're getting make sense, the players are actually similar to the baseline player, etc. The second shortlist is the more interesting one which spans many more leagues but considers only players less than the age of 25. I don't yet have a way to adjust for league difficulty so right now all players are treated as having played equally skilled opposition.
+
+<b>How to use the interactive visualisation</b>
+
+The visualisation has three charts, two parallel coordinates ( the ones with lots of lines, ) and a horizontal stacked bar chart.
+
+The two parallel coordinate charts are structured similarly, with a thick almost vertical black line marking the baseline player's numbers, and all the other players arranged around it. You can hover or click over a particular player's lines and points to get an idea of the difference from the baseline. One of the parallel coordinate charts highlights the values for various raw metrics this player has. The other chart shows a higher level score for the player for various player roles. There is no absolute meaning to the values in the second chart, it is only a comparison between various players and the baseline player.
+
+The stacked bar chart indicates the positives and the negatives of each player over the baseline. In this chart, the player himself also has positives and negatives compared to the baseline. This corresponds to the sort of variation you see between games from the player themselves. Each part of the stacked bar relates to one of the variables being used to assess this player. The red ones are the ones where the player is lacking compared to the PoI and are the ones dictating their presence and position in the list. The green ones are where the player is better than the PoI. You can hover or click on any of the parts to get more details.
+
+There are four modes which you can operate the visualisation in. These priarily reflect how the axes of the parallel coordinates.
+
+- Playing style: The axes are scaled to reflect the variation of that variable in the player's performances.
+
+- Rank within all: The axes linearly go from the lowest rank to the highest rank, with the values of the metric itself not necessarily being uniformly spaced. 
+
+- Scale within all: The axes linearly go from the lowest to the highest value amongst all the players that were compared to the baseline player.
+
+- Scale within subset: The axes linearly go from the lowest to the highest value amongst all the players that made it to the shortlist.
+
+Here are the results for everyone's faovourite find-the-next candidate, Virgil Van Dijk -
+
+
+#### Shortlist 1
+
+```{r ConfigVVD, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rcb','lcb','rcb3','lcb3','cb')
+cPlayerIdOfInterest = 188624
+vcTemplates = c('aerial_defensive', 'aerial_offensive', 'defender','passer_deep')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionVVD, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersVVD, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3VVD, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+#### Shortlist 2
+
+```{r ConfigVVDYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionVVDYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayers, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+```
+
+```{r DisplayingAttributesPlotD3VVDYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+## Data Used
+
+I got Wyscout data from Oct 2018 to Sept 2019 to use in this exercise.
+
+## More examples {.tabset .tabset-fade .tabset-pills}
+
+
+```{r ConfigDeanHenderson, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('gk')
+cPlayerIdOfInterest = 317323
+vcTemplates = c('goalkeeper')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryDeanHendersonAddition, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersDeanHenderson, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3DeanHenderson, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigDeanHendersonYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionDeanHendersonYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersDeanHendersonYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3DeanHendersonYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigOnana, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('gk')
+cPlayerIdOfInterest = 372465
+vcTemplates = c('goalkeeper')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryOnanaAddition, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersOnana, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Onana, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigOnanaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionOnanaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersOnanaYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3OnanaYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigMaguire, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+vcPositionsOfInterest = c('rcb','lcb','rcb3','lcb3','cb')
+cPlayerIdOfInterest = 182047 
+vcTemplates = c('aerial_defensive', 'aerial_offensive', 'defender','passer_deep')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryMaguireAddition, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersMaguire, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Maguire, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigMaguireYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionMaguireYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersMaguireYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3MaguireYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigWanBissaka, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rb','rwb','rb5')
+cPlayerIdOfInterest =  470717
+vcTemplates = c('defender','runner','aerial_defensive')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionWanBissaka, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersWanBissaka, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3WanBissaka, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigWanBissakaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionWanBissakaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersWanBissakaYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3WanBissakaYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+
+```{r ConfigChilwell, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('lb','lwb','lb5')
+cPlayerIdOfInterest = 383419
+vcTemplates = c('defender','runner','crosser')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionChilwell, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersChilwell, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Chilwell, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigChilwellYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionChilwellYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersChilwellYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3ChilwellYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigEmreCan, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rdmf','ldmf','dmf','rcmf3','rcmf','lcmf','lcmf3')
+cPlayerIdOfInterest = 159872
+vcTemplates = c('defender','passer','passer_deep')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEmreCan, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersEmreCan, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3EmreCan, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigEmreCanYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEmreCanYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersEmreCanYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3EmreCanYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigFernandinho, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rdmf','ldmf','dmf')
+cPlayerIdOfInterest = 19655
+vcTemplates = c('defender','passer','passer_deep')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionFernandinho, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersFernandinho, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Fernandinho, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigFernandinhoYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionFernandinhoYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersFernandinhoYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3FernandinhoYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigGrealish, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('lcmf','rcmf','lcmf3','rcmf3')
+cPlayerIdOfInterest = 213954
+vcTemplates = c('playmaker_10','passer_deep','dribbler','scorer')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionGrealish, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersGrealish, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Grealish, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigGrealishYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionGrealishYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersGrealishYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3GrealishYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigThiagoAlcantara, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('ldmf','dmf','rdmf','lcmf','rcmf','lcmf3','rcmf3')
+cPlayerIdOfInterest = 79017
+vcTemplates = c('playmaker_10','passer_deep','defender','dribbler')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionThiagoAlcantara, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersThiagoAlcantara, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3ThiagoAlcantara, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigThiagoAlcantaraYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionThiagoAlcantaraYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersThiagoAlcantaraYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3ThiagoAlcantaraYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigDavidSilva, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('ramf','amf','lamf','lcmf3','rcmf3')
+cPlayerIdOfInterest = 3026
+vcTemplates = c('scorer','playmaker_10','passer_deep')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionDavidSilva, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersDavidSilva, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3DavidSilva, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfiDavidSilvaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionDavidSilvaYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersDavidSilvaYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotDDavidSilvaYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigEriksen, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rw','lw','ramf','amf','lamf','rwf','lwf')
+cPlayerIdOfInterest = 95871
+vcTemplates = c('scorer','crosser','passer_deep','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEriksen, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersEriksen, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Eriksen, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfiEriksenYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEriksenYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersEriksenYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotDEriksenYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigMessi, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rw','lw','ramf','amf','lamf','rwf','lwf')
+cPlayerIdOfInterest = 119
+vcTemplates = c('runner','dribbler','scorer','passer_deep','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionMessi, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersMessi, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Messi, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigMessiYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+
+```{r SearchSummaryAdditionMessiYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+
+```{r SimilarPlayersMessiYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3MessiYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigPulisic, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rw','lw','ramf','amf','lamf','rwf','lwf')
+cPlayerIdOfInterest = 413835
+vcTemplates = c('runner','dribbler','scorer','crosser','passer_deep','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionPulisic, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersPulisic, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Pulisic, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigPulisicYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionPulisicYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersPulisicYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3PulisicYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigEdenHazard, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rw','lw','ramf','amf','lamf','rwf','lwf')
+cPlayerIdOfInterest = 39358
+vcTemplates = c('runner','dribbler','scorer','crosser','passer_deep','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEdenHazard, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersEdenHazard, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3EdenHazard, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigEdenHazardYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionEdenHazardYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersEdenHazardYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3EdenHazardYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigCoutinho, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('rw','lw','ramf','amf','lamf','rwf','lwf')
+cPlayerIdOfInterest = 82507
+vcTemplates = c('runner','dribbler','scorer','crosser','passer_deep','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionCoutinho, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersCoutinho, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Coutinho, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigCoutinhoYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionCoutinhoYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersCoutinhoYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3CoutinhoYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigKane, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+# dtPlayerMatchesofInterest[grepl(x = name, pattern = 'Dijk'), list(name, playerId)]
+cPlayerIdOfInterest = 158575
+vcTemplates = c('scorer','aerial_offensive','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionKane, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersKane, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Kane, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigKaneYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionKaneYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersKaneYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3KaneYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigSuarez, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+cPlayerIdOfInterest = 2290
+vcTemplates = c('scorer','dribbler')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SimilarPlayersSuarez, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionSuarez, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r DisplayingAttributesPlotD3Suarez, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigSuarezYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionSuarezYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersSuarezYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3SuarezYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+```{r ConfigAguero, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+cPlayerIdOfInterest = 3051
+vcTemplates = c('scorer','runner','dribbler')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]`
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionAguero, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersAguero, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Aguero, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigAgueroYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionAgueroYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersAgueroYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3AgueroYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+## Anecdotal Validation
+
+( Apologies for the EPL heavy examples but those are players I'm more familiar with. )
+
+( Thank god for Guardiola and Man City's money. Makes it much easier to do this anecdotal validation. )
+
+I was particularly happy to see some of the lists -
+
+- Van Dijk, with Laporte on top of his list. VVD was a transfer target for Guardiola but they settled for Laporte instead.
+- Fernandinho, with pretty much every player whom Guardiola has either played in the same position earlier or was rumoured to be interested in buying.
+- David Silva, with Bernardo Silva and Ilkay Gundogan, they rotate in the same position for the same team.
+- Pulisic has Hazard and, interestingly, Hudson Odoi on the list, both of them have played for Chelsea in a similar position as Pulisic who eventually joined Chelsea later in January. W. Zaha, another player Chelsea are rumoured to be interested in, is also on the list.
+- Hazard's list also has Willian, who plays on the other side of Chelsea's attack, and Hudson Odoi who plays in the same position.
+- Aguero, with Jesus. Both of thme play in the same position for Guardiola's team.
+
+## Comments
+
+Some things need more work:
+
+- Goalkeeper similarities. Right now there is just one category of a keeper.
+- Better understanding of the variables. I've chosen variables for player roles based on my partial understanding of the data. I won't be surprised if I have misunderstood some of them.
+- More nuanced categories. I have overarching categories like playmaker, dribbler, etc. but I feel there can be finer categories than this. This will go hand in hand with improvements in understanding the meaning of the variables.
+- More data. This is the cop out. There is a lot more data, even aggregated, which could be made available and help in better comparisons. Physicality related data such as top speed, kms run, etc. could be an easy addition.
+
+
+## Get in touch
+
+Have comments or other player requests? Find <a href="twitter.com/thecomeonman">me on Twitter - @thecomeonman</a>!
