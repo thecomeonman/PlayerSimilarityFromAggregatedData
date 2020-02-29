@@ -2222,7 +2222,7 @@ cat(
 
 ```{r ConfigKane, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
-vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+vcPositionsOfInterest = c('cf')
 # dtPlayerMatchesofInterest[grepl(x = name, pattern = 'Dijk'), list(name, playerId)]
 cPlayerIdOfInterest = 158575
 vcTemplates = c('scorer','aerial_offensive','playmaker_10')
@@ -2344,7 +2344,7 @@ cat(
 
 ```{r ConfigSuarez, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
-vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+vcPositionsOfInterest = c('cf')
 cPlayerIdOfInterest = 2290
 vcTemplates = c('scorer','dribbler')
 fPlayerFilter = function( lPlayer, dtLineups ) {
@@ -2466,7 +2466,7 @@ cat(
 
 ```{r ConfigAguero, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
 
-vcPositionsOfInterest = c('ss','rwf','lwf','cf')
+vcPositionsOfInterest = c('cf')
 cPlayerIdOfInterest = 3051
 vcTemplates = c('scorer','runner','dribbler')
 fPlayerFilter = function( lPlayer, dtLineups ) {
@@ -2583,6 +2583,129 @@ cat(
 ```
 
 ```{r DisplayingAttributesPlotD3AgueroYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+
+
+```{r ConfigLewandowski, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+vcPositionsOfInterest = c('cf')
+cPlayerIdOfInterest = 41310
+vcTemplates = c('scorer','runner','dribbler','aerial_offensive','playmaker_10')
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      current_team_id %in% dtLineups[
+         grepl(
+            x = tournamentName,
+            pattern = 'England/EPL|Spain/Prim|Germany/Bund|France/Ligue1|Italy/SerieA',
+            # pattern = ''
+         ) |
+         playerId == cPlayerIdOfInterest, 
+         teamId
+      ]
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+### `r dtLineups[playerId == cPlayerIdOfInterest, as.character(name[1])]` {.tabset .tabset-fade .tabset-pills}
+
+#### Top 5 league matches
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionLewandowski, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only top 5 leages - EPL, Ligue 1, La Liga, Bundesliga, and Serie A players considered')
+```
+
+```{r SimilarPlayersLewandowski, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3Lewandowski, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
+```
+
+```{r ConfigLewandowskiYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+
+fPlayerFilter = function( lPlayer, dtLineups ) {
+   # return ( T )
+   
+   dtPlayerBios[
+      age <= 25 | playerId == cPlayerIdOfInterest
+      , 
+      playerId
+   ]
+   
+   # ( lPlayer$lPlayerBio$market_value > 100000 ) &
+   # ( lPlayer$lPlayerBio$age < 26 & lPlayer$lPlayerBio$market_value < 30000000 )
+}
+iShortlistNumber = iShortlistNumber + 1
+
+```
+
+```{r Data, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+#### Young matches
+
+```{r PlayerSuperset, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r FeatureGeneration, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummary, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r SearchSummaryAdditionLewandowskiYoung, cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+cat('Only players of age 25 and below considered.')
+
+
+cat(
+   paste0(
+      '<br><br>Players from any team in the following tournaments were considered - ',
+      dtLineups[,
+         paste(
+            sort(
+               gsub(
+                  gsub(
+                     unique(tournamentName), 
+                     pattern = '^/|/$', 
+                     replacement = ''
+                  ), 
+                  pattern = '/', 
+                  replacement = '-'
+               )
+            ), 
+            collapse = ', '
+         )
+      ]
+   )
+)
+
+```
+
+```{r SimilarPlayersLewandowskiYoung, ref.label = 'SimilarPlayers', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 8, results = 'asis'}
+```
+
+```{r DisplayingAttributesPlotD3LewandowskiYoung, ref.label = 'DisplayingAttributesPlotD3', cache=FALSE, echo=FALSE, warning=FALSE, message=FALSE, fig.width = 15, fig.height = 15, results = 'asis'}
 ```
 
 ## Anecdotal Validation
