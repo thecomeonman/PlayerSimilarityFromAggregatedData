@@ -117,6 +117,26 @@ The order of suitability is then decided based on the total shortcomings of the 
 Why are other players above the PoI?
 They are better 
 
+<b>More details about the methodology</b>
+
+It's June 2022 and I get paid to do this stuff now so if it helps you, here are some more details about the model I had. It's been too long and this is as much as I can recollect without going through code.
+
+Split the data by each player and any additional qualifiers like season, role, etc. so long as you don't spread your data too thin. Each split is basically one of the entities which you want to compare to another entitiy to find similarities. Let's say you want to find players similar to Messi's 2019 performance so maybe you split your data by player-season combinations amongst which one of the splits would be Messi-2019.
+
+From each split, take random samples with replacement of, say, 5 matches. This gives you a distribution from which you can calculate a mean/median, and a variance in the value of each stat. Think of these values as what you could expect to see if you were to randomly observe 5 matches they played in, sort of like a scout maybe. We are in central limit theorem territory so we can retain the mean, median, and variance and discard the rest of the data.
+
+As an explanation of the philosophy behind the model, let us club the values we see for a particular feature into four categories - high mean, high coeff of variance ( std dev / mean ), low mean, high coeff of variance, high mean, low coeff of variance, low mean, low coeff of variance. If we were to divide the mean and std dev values you see for non-penalty goals per 90 for all the players amongst these four groups, you could interpret it as follows - players with high mean - low coeff of variance do well at this feature - such as strikers with high consistent output. Players with HM-HCV are the ones probably good at it but are either inconsistent or the team doesn't need them to be consistent at - maybe a midfielder who sometimes has more attacking responsibilities and scores often at those times but not at other times. Players with LM-LCV and LM-HCV may or may not have the skill but don't need to be performing on that feature at all - maybe centre backs.
+
+For each feature, we now compute the Z score for all other entities based on the feature means and std devs of Messi-2019. So if Messi in 2019 scored 0.6 goals per 90 with a variance of 0.25, and another player-season scored 0.55 goals per 90, the second player would have a Z score on this feature of ( 0.55 - 0.6 ) / 0.25 = -0.2. We can similarly calculate a Z score for all the other features for all other player-seasons.
+
+We now have a numerical representation of each player wrt to Messi-2019. We can now do a bunch of things rank and filter them. We could rank them by the number of features a player has a negative Z score on, or the average Z score across all features, or something more nuanced such as the average Z score but only onthe subset of feature that Messi-2019 had a relatively low CV on.
+
+As with most algorithms, your choice of splits, your choice of features, your choice of ranking logic, and many other choices that you're making will eventually decide the quality of your results. What works for one player may not necessarily work for another. Given how long it has been since I used this model, you're probably better off experimenting yourself and finding what works for you. Also don't get too hung up on the ranks - you'll have more suitable players towards the top of the rankings and less suitable players towards the bottom but I wouldn't fuss too much about rank 1 being much better than rank 5.
+
+For an idea of the results you can expect, some other places I used this:
+- A Twitter thread with a bunch of results from back in summer 2020 - https://twitter.com/thecomeonman/status/1306654311661760512 with, I think, some default settings.
+- A post about finding replacements for Messi and Suarez from summer 2020 - https://github.com/thecomeonman/Replacing-Suarez-and-Messi. This is a more agressive way of using this model where I run it multiple times over different seasons and picking those who appear towards the top more often.
+
 ### Results {.tabset .tabset-fade .tabset-pills}
 
 For every player, I've calculated two shortlists. The first shortlist is only amongst players who play in the top 5 leagues. This shortlist is to validate that the results we're getting make sense, the players are actually similar to the baseline player, etc. The second shortlist is the more interesting one which spans many more leagues but considers only players less than the age of 25. I don't yet have a way to adjust for league difficulty so right now all players are treated as having played equally skilled opposition.
